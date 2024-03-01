@@ -446,11 +446,18 @@ def getargs():
     P.add_argument('-S' ,'--store', type=store_arg, action='append', default=[],
                    metavar='#=file',
                    help='Initialize part of memory from file.  May be repeated.')
+    P.add_argument('--sr1', type=lambda v: int(v, 0), default=0)
+    P.add_argument('--cr1', type=lambda v: int(v, 0), default=0)
+    P.add_argument('--wp_n', type=int, default=1)
     return P
 
 async def realmain(args):
     bus = BSPI()
     bus._dev = dev = FlashDev()
+
+    bus._dev._sr1 = args.sr1
+    bus._dev._cr1 = args.cr1
+    bus._dev._wp_n = args.wp_n!=0
 
     if args.mem:
         init = Path(args.mem).read_bytes()

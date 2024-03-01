@@ -194,6 +194,18 @@ def flash_clear_status(cli: SPIClient, args):
 
 def flash_setup(cli: SPIClient, args):
     sr1, cr1 = args.sr1, args.cr1
+
+    if args.marble_init:
+        if sr1 is not None or cr1 is not None:
+            sys.error('--marble-init may not be used with --sr1 or --cr1')
+            sys.exit(1)
+        # SRWD - Prevent CR1/SR1 when WP# pulled down
+        # BP2 | BP1 - Write protect half of address space
+        sr1 = 0b10011000 # SRWD | BP2 | BR1
+        # TBPARM - move 4kb sectors to top (high) addreses
+        # TBPROT - apply Block Protect from bottom (low) addresses
+        cr1 = 0b00100100 # TBPROT | TBPARM
+
     cmd = struct.pack('BB', 0x01, sr1)
     if cr1 is not None:
         if not args.yes:
@@ -304,6 +316,36 @@ def flash_verify(cli: SPIClient, args):
     else:
         sys.stderr.write('\nMatch\n')
 
+def handleBP(func):
+    """Ensure previous errors are cleared and handle --force
+    """
+    def wrapper(cli: SPIClient, args):
+        sr1, = cli.tr([b'\x05\x00'])
+        if sr1[1]&0b01100000:
+            _log.error('Clear previous error and retry. (0x%02x)', sr1[1])
+            sys.exit(1)
+        bpmask = 0b00011100
+        bp = sr1[1]&bpmask
+        if args.force and bp!=0:
+            _log.info('Disable Block Protection.  0x%02x', bp)
+            orig = sr1[1]
+            _wren, _wrr, sr1 = cli.tr([b'\x06', struct.pack('>BB', 1, orig&~bpmask), b'\x05\x00'])
+            if sr1[1]&bpmask:
+                raise RuntimeError('Unable to disable Block Protection.  Check WP#  (%02x)', sr1[1])
+
+        try:
+            return func(cli, args)
+        finally:
+             if args.force and bp!=0:
+                _log.info('Restore Block Protection.  0x%02x', bp)
+                sr1, = cli.tr([b'\x05\x00'])
+                sr1 = (sr1[1]&~bpmask) | bp
+                _wren, _wrr, sr1 = cli.tr([b'\x06', struct.pack('>BB', 1, sr1), b'\x05\x00'])
+                _log.info('Restored Block Protection')
+
+    return wrapper
+
+@handleBP
 def flash_bulk_erase(cli: SPIClient, args):
     _wren, _be, sr1 = cli.tr([b'\x06', b'\x60', b'\x05\x00'])
     if sr1[1]&0b01100000:
@@ -317,6 +359,7 @@ def flash_bulk_erase(cli: SPIClient, args):
 
     print('Erased')
 
+@handleBP
 def flash_erase(cli: SPIClient, args):
     # probe sector geometry
 
@@ -404,6 +447,7 @@ def flash_erase(cli: SPIClient, args):
 
     sys.stdout.write(f'\rErase complete\n')
 
+@handleBP
 def flash_program(cli: SPIClient, args):
     base, file = args.base, args.file
 
@@ -569,6 +613,8 @@ def getargs():
     S = SP.add_parser('setup', help='Set SR1 and CR1')
     S.add_argument('--sr1', type=lambda v: int(v, 0))
     S.add_argument('--cr1', type=lambda v: int(v, 0))
+    S.add_argument('--marble-init', action='store_true',
+                   help='Burn OTP fuses to configure Marble address map and protection')
     S.add_argument('-y', '--yes', action='store_true', default=False)
     S.set_defaults(func=flash_setup)
 
@@ -597,6 +643,8 @@ def getargs():
     S.set_defaults(func=flash_verify)
 
     S = SP.add_parser('wipe', help='Bulk/mass Erase entire flash')
+    S.add_argument('-f', '--force', action='store_true',
+                   help='Override Block Protect')
     S.set_defaults(func=flash_bulk_erase)
 
     S = SP.add_parser('erase', help='Erase some/all of flash')
@@ -604,6 +652,8 @@ def getargs():
                    help='Base address (bytes)  eg. "1024" or "4M" or "0x800"')
     S.add_argument('size', type=human_number,
                    help='Size (bytes)')
+    S.add_argument('-f', '--force', action='store_true',
+                   help='Override Block Protect')
     S.add_argument('-n', '--no-act', action='store_true', default=False,
                    help='Do not actually erase')
     S.set_defaults(func=flash_erase)
@@ -613,6 +663,8 @@ def getargs():
                    help='Base address (bytes)  eg. "1024" or "4M" or "0x800"')
     S.add_argument('file',
                    help='Read from file instead of stdin')
+    S.add_argument('-f', '--force', action='store_true',
+                   help='Override Block Protect')
     S.add_argument('-n', '--no-act', action='store_true', default=False,
                    help='Do not actually erase')
     S.add_argument('--no-erase', action='store_true', default=False,
