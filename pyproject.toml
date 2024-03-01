@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alluvium"
+version = "0.0.1"
+authors = [
+    {name = "Michael Davidsaver", email = "mdavidsaver@gmail.com"},
+]
+description = "CLI for Bedrock FPGA control"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+alluvium = "alluvium:main"
