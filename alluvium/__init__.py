@@ -213,7 +213,10 @@ def flash_reset(cli: SPIClient, args):
 def flash_read(cli: SPIClient, args):
     base, count, out = args.base, args.size, args.file
 
-    if count=='bit':
+    if args.space=='otp':
+        assert base<1024 and base+count<=1024
+
+    elif count=='bit':
         with cli.open('rb') as FF:
             FF.seek(base)
             XB = XBit.parse(FF)
@@ -224,9 +227,7 @@ def flash_read(cli: SPIClient, args):
 
     out = open(out, 'wb') if out and out!='-' else sys.stdout.buffer
 
-    cmd = b'\x13' if end>0xffffff else b'\x03' # assume 4 byte address support for > 16MB access
-
-    _log.debug('Will read [0x%08x, 0x%08x] with 0x%02x', base, end, cmd[0])
+    _log.debug('Will read [0x%08x, 0x%08x]', base, end)
 
     # last read will be longer than necessary.
     rsize = 256 # conform to LMASK limitation
@@ -234,12 +235,15 @@ def flash_read(cli: SPIClient, args):
     T0 = time.monotonic()
     for start in range(base, base+count, rsize):
         addr = struct.pack('>I', start)
-        if cmd==b'\x03':
-            assert addr[0]==0
-            addr = addr[1:]
+        if args.space=='otp':
+            cmd = b'\x4b' + addr[1:] + b'\0'
+        elif addr[0]==0:
+            cmd = b'\x03' + addr[1:]
+        else:
+            cmd = b'\x13' + addr
 
-        val, = cli.tr([cmd + addr + rsize*b'\0'])
-        val = val[len(cmd)+len(addr):][:count]
+        val, = cli.tr([cmd + rsize*b'\0'])
+        val = val[len(cmd):][:count]
 
         out.write(val)
         count -= len(val)
@@ -578,6 +582,9 @@ def getargs():
                    help='Size (bytes), or "bit" to attempt to read as xilinx bit file')
     S.add_argument('-f', '--file', default='-',
                    help='Read into file instead of stdout')
+    S.add_argument('--otp', action='store_const', const='otp',
+                   dest='space', default='mem',
+                   help='Read out OTP space instead of memory')
     S.set_defaults(func=flash_read)
 
     S = SP.add_parser('verify', help='Compare contents with file')

@@ -29,6 +29,7 @@ class Cmd(IntEnum):
     P4E4  = 0x21
     CLSR  = 0x30
     RDCR  = 0x35
+    OTPR  = 0x4b
     BE    = 0x60
     REMS  = 0x90
     RDID  = 0x9f
@@ -42,12 +43,15 @@ BPmap = {n:(2**(17+n)&~0x3ffff) for n in range(8)}
 class FlashDev:
     capacity: int = 0x1000000
     mem: bytearray = bytearray(b'\xff'*16*2**20)
+    otp: bytearray = bytearray(b'\xff'*1024)
 
     def __init__(self):
         self._sr1 = 0
         self._sr2 = 0
         self._cr1 = 0
         self._wp_n = True # WP# True permits writes
+
+        self.otp[:5] = b'hello'
 
         self._recompute_geometry()
 
@@ -196,7 +200,7 @@ class FlashDev:
         repl = b''
 
         # extract address
-        if cmd in (Cmd.READ, Cmd.P4E, Cmd.SE, Cmd.REMS, Cmd.PP): # 3 byte address
+        if cmd in (Cmd.READ, Cmd.P4E, Cmd.SE, Cmd.REMS, Cmd.PP, Cmd.OTPR): # 3 byte address
             addr, = unpack('>I', b'\0' + inp[0:3])
             inp = inp[3:]
             repl = b'\xff'*3
@@ -205,6 +209,10 @@ class FlashDev:
             addr, = unpack('>I', inp[:4])
             inp = inp[4:]
             repl = b'\xff'*4
+
+        if cmd in (Cmd.OTPR,): # "fast" read skip dummy
+            inp = inp[1:]
+            repl = repl + b'\xff'
 
         if cmd==Cmd.REMS: # addr is not really an addr...
             addr &= 1
@@ -216,6 +224,9 @@ class FlashDev:
             cnt = len(inp)
             assert addr+cnt <= len(self.mem) # wrapping not implemented...
             return repl + self.mem[addr:addr+cnt]
+
+        if cmd==Cmd.OTPR:
+            return repl + self.otp[addr:addr+len(inp)]
 
         # lookup erase sector info, and mutability
         base, size, writable = self.addr2page(addr)
