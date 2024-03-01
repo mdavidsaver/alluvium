@@ -64,3 +64,17 @@ def test_read_bit(bspi: SPIClient):
 
         inp = Path(out).read_bytes()
     assert inp==dummy_bit
+
+def test_setup(bspi: SPIClient):
+    assert bspi._mem._sr1==0
+    assert bspi._mem._cr1==0
+
+    args = getargs().parse_args(['unused:804', 'setup',
+                                 '--sr1', '0b10011000',
+                                 '--cr1', '0b00100100',
+                                 '--yes',
+                                 ])
+    args.func(bspi, args)
+
+    assert bspi._mem._sr1==0b10011000
+    assert bspi._mem._cr1==0b00100100

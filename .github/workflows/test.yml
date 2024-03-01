@@ -19,6 +19,6 @@ jobs:
           with:
             python-version: ${{ matrix.python-version }}
         - name: Deps
-          run: pip install pytest
+          run: pip install pytest pytest-cov
         - name: Test
-          run: python -m pytest -v --log-level=DEBUG
+          run: python -m pytest -v --log-level=DEBUG --cov=alluvium
