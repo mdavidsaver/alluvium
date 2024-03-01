@@ -44,6 +44,10 @@ _manu = {
     1: 'Infineon',
 }
 
+_family = {
+    0x80: 'FL-S',
+}
+
 _sector_arch = {
     0: 'Uniform',
     1: '4KB param sect. w/ uniform 64KB',
@@ -80,7 +84,7 @@ def _erase_region(b: bytes):
 _cfi_info = [
     ('Manu', 0x00, lambda b: _manu.get(b)),
     ('SArc', 0x04, lambda b: _sector_arch.get(b)),
-    ('Faml', 0x05, lambda b: None),
+    ('Faml', 0x05, lambda b: _family.get(b)),
     ('Modl', slice(0x06, 0x08), lambda b: b),
     ('Size', 0x27, lambda b: f'{2**b} b'),
     ('IF  ', slice(0x28, 0x2a), lambda b: _cfi_iface.get(b)),
@@ -371,7 +375,10 @@ def flash_erase(cli: SPIClient, args):
     cr1, = cli.tr([b'\x35\x00'])
     cr1 = cr1[1]
 
-    assert info[0x10:0x13]==b'QRY' # sanity check
+    # sanity check
+    assert info[0x10:0x13]==b'QRY'
+    # may be catch violation of assumptions about erase geometry
+    assert (info[0x00], info[0x05])==(0x01, 0x80) # Infineon, FL-S
 
     size = 2**info[0x27]
     assert size==16*2**20, size
