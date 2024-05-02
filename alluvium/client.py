@@ -81,7 +81,7 @@ class SPIClient:
 
             sts = repl[1]
             if sts==3: # incomplete?  must poll for completion?
-                time.sleep(0.0001) # Zzzzzz
+                time.sleep(0.001) # Zzzzzz
                 _log.debug('POKE -> %r', poke)
                 self.S.send(poke)
 
