@@ -655,7 +655,7 @@ def getargs():
     S.set_defaults(func=flash_bulk_erase)
 
     S = SP.add_parser('erase', help='Erase some/all of flash')
-    S.add_argument('base', type=human_number,
+    S.add_argument('base', type=human_number_address,
                    help='Base address (bytes)  eg. "1024" or "4M" or "0x800"')
     S.add_argument('size', type=human_number,
                    help='Size (bytes)')
