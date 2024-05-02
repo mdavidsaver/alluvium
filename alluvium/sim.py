@@ -468,7 +468,8 @@ async def realmain(args):
         init = path.read_bytes()
         dev.mem[addr:addr+len(init)] = init
 
-    del init
+    if args.mem:
+        del init
 
     loop = asyncio.get_running_loop()
     SOCK, _bus = await loop.create_datagram_endpoint(lambda: bus, args.bind)
