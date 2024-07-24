@@ -38,6 +38,18 @@ class SPIClient:
         if self.timeout>0:
             self.S.settimeout(self.timeout)
 
+    def close(self):
+        self.S.close()
+
+    def __enter__(self):
+        return self
+    def __exit__(self,A,B,C):
+        self.close()
+
+    @property
+    def dest(self):
+        return f'{self.host}:{self.port}'
+
     def tr(self, ops: [bytes], dest=Dest.SPI) -> [bytes]:
         """operate([b'\x90\x00\x00', b'\x9f\x00']) -> [b'\xff\xff\x15', b'\xff\x15']
 

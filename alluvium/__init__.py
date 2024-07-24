@@ -7,7 +7,9 @@ import struct
 import socket
 import sys
 import time
+from functools import wraps
 from binascii import hexlify
+import multiprocessing as MP
 
 try:
     from os import isatty
@@ -270,7 +272,7 @@ def flash_read(cli: SPIClient, args):
 
     out.close()
 
-    sys.stderr.write('\rRead complete\r\n')
+    sys.stderr.write(f'\rRead complete {cli.dest}\r\n')
 
 def flash_verify(cli: SPIClient, args):
     base, count, inp = args.base, args.size, args.file
@@ -323,6 +325,7 @@ def flash_verify(cli: SPIClient, args):
 def handleBP(func):
     """Ensure previous errors are cleared and handle --force
     """
+    @wraps(func)
     def wrapper(cli: SPIClient, args):
         sr1, = cli.tr([b'\x05\x00'])
         if sr1[1]&0b01100000:
@@ -452,7 +455,7 @@ def flash_erase(cli: SPIClient, args):
             time.sleep(0.001)
             sr1, = cli.tr([b'\x05\x00'])
 
-    sys.stdout.write(f'\rErase complete\n')
+    sys.stdout.write(f'\rErase complete {cli.dest}\n')
 
 @handleBP
 def flash_program(cli: SPIClient, args):
@@ -502,7 +505,7 @@ def flash_program(cli: SPIClient, args):
         base += cnt
         size -= cnt
 
-    sys.stdout.write('\rProgramming complete\n')
+    sys.stdout.write(f'\rProgramming complete {cli.dest}\n')
 
     if not args.no_verify:
         flash_verify(cli, args)
@@ -560,6 +563,32 @@ def xilinx_reboot(cli: SPIClient, args):
         _log.error('Presume not booting???')
         sys.exit(1)
 
+def peers(s: str) -> [(str, int)]:
+    from argparse import ArgumentError
+    ret = []
+    # first see if arg is file containing list of endpoints
+    try:
+        with open(s, 'r') as F:
+            for line in F:
+                line = line.strip()
+                if line[:1] in ('' or '#'):
+                    continue
+                ret.append(peer(line))
+        return ret
+
+    except FileNotFoundError:
+        # look for comma seperated list of endpoints
+        ret = [peer(ep) for ep in s.split(',')]
+
+    if len(ret)==0:
+        raise ArgumentError(None, 'destination list must include at least one peer')
+
+    unique = set(ret)
+    if len(unique)!=len(ret):
+        raise ArgumentError(None, 'destination list must not contain duplicates')
+
+    return ret
+
 def peer(s: str) -> (str, int):
     host, _sep, port = s.partition(':')
     return (host, int(port or '804'))
@@ -597,8 +626,10 @@ def getargs():
     P.add_argument('-q', '--quiet', action='store_const', const=logging.WARNING,
                    dest='level',
                    help='Make less noise')
-    P.add_argument('dest', type=peer,
-                   help='Device host/IP : port.  eg. "devfoo" or "myhost:804"')
+    P.add_argument('dest', type=peers,
+                   help='''Device host/IP : port.  eg. "devfoo" or "myhost:804".
+A comma seperated list of the same, or the name of a file containing lines of the same format.
+''')
 
     SP = P.add_subparsers()
 
@@ -692,15 +723,42 @@ def getargs():
 
     return P
 
+def wrapper(name, dest, args):
+    # lookup by name to avoid pickle limitations
+    action = globals()[name]
+    with SPIClient(dest) as cli:
+        action(cli, args)
+
 def main():
+    MP.set_start_method('spawn')
     P = getargs()
     args = P.parse_args()
     logging.basicConfig(level=args.level)
-    cli = SPIClient(args.dest)
+
     try:
         action = args.func
     except AttributeError:
         P.print_usage()
         sys.exit(1)
-    else:
-        action(cli, args)
+
+    procs = []
+    for dest in args.dest:
+        P = MP.Process(target=wrapper, args=(action.__name__, dest, args))
+        procs.append((dest, P))
+        P.start()
+
+    fails = []
+    for dest, P in procs:
+        try:
+            P.join()
+            if P.exitcode==0:
+                continue
+        except:
+            _log.exception('join %s', dest)
+        fails.append((dest, P.exitcode))
+
+    if fails:
+        print('Operations failed for:')
+        for (addr, port), code in fails:
+            print(f' {code} {addr}:{port}')
+        sys.exit(1)
