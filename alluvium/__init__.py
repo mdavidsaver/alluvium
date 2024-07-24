@@ -19,6 +19,7 @@ except ImportError:
 
 from .client import SPIClient, Dest
 from .xbit import XBit
+from .progress import Progress
 
 if isatty(sys.stdout.fileno()):
     def HL(s: str) -> str:
@@ -250,29 +251,27 @@ def flash_read(cli: SPIClient, args):
     # last read will be longer than necessary.
     rsize = 256 # conform to LMASK limitation
 
-    T0 = time.monotonic()
-    for start in range(base, base+count, rsize):
-        addr = struct.pack('>I', start)
-        if args.space=='otp':
-            cmd = b'\x4b' + addr[1:] + b'\0'
-        elif addr[0]==0:
-            cmd = b'\x03' + addr[1:]
-        else:
-            cmd = b'\x13' + addr
+    with Progress(base+count) as progress:
+        for start in range(base, base+count, rsize):
+            addr = struct.pack('>I', start)
+            if args.space=='otp':
+                cmd = b'\x4b' + addr[1:] + b'\0'
+            elif addr[0]==0:
+                cmd = b'\x03' + addr[1:]
+            else:
+                cmd = b'\x13' + addr
 
-        val, = cli.tr([cmd + rsize*b'\0'])
-        val = val[len(cmd):][:count]
+            val, = cli.tr([cmd + rsize*b'\0'])
+            val = val[len(cmd):][:count]
 
-        out.write(val)
-        count -= len(val)
+            out.write(val)
+            count -= len(val)
 
-        now = time.monotonic()
-        sys.stderr.write(f'\r{count:08x} {now-T0:.3f}')
-        T0 = now
+            progress.update(start+rsize)
 
     out.close()
 
-    sys.stderr.write(f'\rRead complete {cli.dest}\r\n')
+    sys.stderr.write(f'Read complete {cli.dest}\r\n')
 
 def flash_verify(cli: SPIClient, args):
     base, count, inp = args.base, args.size, args.file
@@ -292,35 +291,36 @@ def flash_verify(cli: SPIClient, args):
 
     ok = True
 
-    T0 = time.monotonic()
-    for start in range(base, base+count, rsize):
-        sys.stderr.write(f'\r {start:08x}')
+    with Progress(base+count) as progress:
+        for start in range(base, base+count, rsize):
 
-        ref = inp.read(rsize)
-        if not len(ref):
-            break
+            ref = inp.read(rsize)
+            if not len(ref):
+                break
 
-        addr = struct.pack('>I', start)
-        if cmd==b'\x03':
-            assert addr[0]==0
-            addr = addr[1:]
+            addr = struct.pack('>I', start)
+            if cmd==b'\x03':
+                assert addr[0]==0
+                addr = addr[1:]
 
-        act, = cli.tr([cmd + addr + rsize*b'\0'])
-        act = act[len(cmd)+len(addr):][:len(ref)]
+            act, = cli.tr([cmd + addr + rsize*b'\0'])
+            act = act[len(cmd)+len(addr):][:len(ref)]
 
-        if ref!=act:
-            print(' mis-match!', file=sys.stderr)
-            print('-', hexlify(ref))
-            print('+', hexlify(act))
-            ok = False
+            if ref!=act:
+                print(' mis-match!', file=sys.stderr)
+                print('-', hexlify(ref))
+                print('+', hexlify(act))
+                ok = False
+
+            progress.update(start+rsize)
 
     inp.close()
 
     if not ok:
-        sys.stderr.write('\nFail\n')
+        print('Fail')
         sys.exit(1)
     else:
-        sys.stderr.write('\nMatch\n')
+        print('Match')
 
 def handleBP(func):
     """Ensure previous errors are cleared and handle --force
@@ -424,38 +424,40 @@ def flash_erase(cli: SPIClient, args):
     # == addr+sz > base and addr<base+count
     todo = [(addr, sz) for addr, sz in geo if addr+sz > base and addr<base+count]
 
-    for addr, sz in todo:
-        sys.stdout.write(f'\r{addr:08x} ')
-        addr = struct.pack('>I', addr)
-        if addr[0]==0:
-            addr = addr[1:]
-            if sz==4096:
-                cmd = b'\x20'
+    with Progress(todo[-1][0]) as progress:
+        for addr, sz in todo:
+            progress.update(addr)
+
+            addr = struct.pack('>I', addr)
+            if addr[0]==0:
+                addr = addr[1:]
+                if sz==4096:
+                    cmd = b'\x20'
+                else:
+                    cmd = b'\xd8'
             else:
-                cmd = b'\xd8'
-        else:
-            if sz==4096:
-                cmd = b'\x21'
+                if sz==4096:
+                    cmd = b'\x21'
+                else:
+                    cmd = b'\xdc'
+
+            cmds = [b'\x06', cmd + addr, b'\x05\x00']
+            if args.no_act:
+                print(cmds)
+                sr1 = b'\0\0'
             else:
-                cmd = b'\xdc'
+                _wren, _erase, sr1 = cli.tr([b'\x06', cmd + addr, b'\x05\x00'])
 
-        cmds = [b'\x06', cmd + addr, b'\x05\x00']
-        if args.no_act:
-            print(cmds)
-            sr1 = b'\0\0'
-        else:
-            _wren, _erase, sr1 = cli.tr([b'\x06', cmd + addr, b'\x05\x00'])
+            if sr1[1]&0b01100000:
+                flash_status(cli, args)
+                _log.error("Erase fails!")
+                sys.exit(1)
 
-        if sr1[1]&0b01100000:
-            flash_status(cli, args)
-            _log.error("Erase fails!")
-            sys.exit(1)
+            while sr1[1]&1: # WIP
+                time.sleep(0.001)
+                sr1, = cli.tr([b'\x05\x00'])
 
-        while sr1[1]&1: # WIP
-            time.sleep(0.001)
-            sr1, = cli.tr([b'\x05\x00'])
-
-    sys.stdout.write(f'\rErase complete {cli.dest}\n')
+    sys.stdout.write(f'Erase complete {cli.dest}\n')
 
 @handleBP
 def flash_program(cli: SPIClient, args):
@@ -472,40 +474,42 @@ def flash_program(cli: SPIClient, args):
     if not args.no_erase:
         flash_erase(cli, args)
 
-    while size:
-        sys.stdout.write(f'\r{base:08x}')
-        cnt = psize - base%psize # byte to write to this page
+    with Progress(base+size) as progress:
+        while size:
+            sys.stdout.write(f'\r{base:08x}')
+            cnt = psize - base%psize # byte to write to this page
 
-        inp = fp.read(cnt)
-        if not inp:
-            break
-        cnt = len(inp)
-        pad = b'\xff'*(psize-cnt) # must pad due to LMASK limitation
+            inp = fp.read(cnt)
+            if not inp:
+                break
+            cnt = len(inp)
+            pad = b'\xff'*(psize-cnt) # must pad due to LMASK limitation
 
-        addr = struct.pack('>I', base)
-        if addr[0]==0:
-            cmd = b''.join([b'\x02', addr[1:], inp, pad])
-        else:
-            cmd = b''.join([b'\x12', addr, inp, pad])
+            addr = struct.pack('>I', base)
+            if addr[0]==0:
+                cmd = b''.join([b'\x02', addr[1:], inp, pad])
+            else:
+                cmd = b''.join([b'\x12', addr, inp, pad])
 
-        if args.no_act:
-            print(cmd)
-            sr1 = b'\0\0'
-        else:
-            _wren, _pp, sr1 = cli.tr([b'\x06', cmd, b'\x05\x00'])
+            if args.no_act:
+                print(cmd)
+                sr1 = b'\0\0'
+            else:
+                _wren, _pp, sr1 = cli.tr([b'\x06', cmd, b'\x05\x00'])
 
-        if sr1[1]&0b01100000:
-            flash_status(cli, args)
-            raise RuntimeError("Program fails!")
+            if sr1[1]&0b01100000:
+                flash_status(cli, args)
+                raise RuntimeError("Program fails!")
 
-        while sr1[1]&1: # WIP
-            time.sleep(0.001)
-            sr1, = cli.tr([b'\x05\x00'])
+            while sr1[1]&1: # WIP
+                time.sleep(0.001)
+                sr1, = cli.tr([b'\x05\x00'])
 
-        base += cnt
-        size -= cnt
+            base += cnt
+            size -= cnt
+            progress.update(base)
 
-    sys.stdout.write(f'\rProgramming complete {cli.dest}\n')
+    sys.stdout.write(f'Programming complete {cli.dest}\n')
 
     if not args.no_verify:
         flash_verify(cli, args)
