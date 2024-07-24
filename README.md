@@ -20,7 +20,7 @@ python3 -m alluvium -h
 ## Usage
 
 The basic form of use is: `python3 -m alluvium <host_or_IP> <command> ...`.
-The entry point provides a number of sub-commands
+The entry point provides a number of sub-commands.
 
 ```sh
 $ python3 -m alluvium 192.168.19.4 status
@@ -100,6 +100,32 @@ $ python3 -m alluvium localhost:8804 setup --sr1 0 --cr1 0b00100100
 ...
 ```
 
+## Batch operations
+
+More than one device may be manipulated in parallel.
+Alluvium will exit after all operations complete or timeout,
+and will return with code 0 only if all operations succeed.
+
+While the following works for all commands,
+it is not useful for commands which write a output file
+as that output would be corrupt.
+
+In addition to simple host/IP address and port,
+a comma seperated list of such entries may be given.
+
+```sh
+$ python3 -m alluvium 192.168.19.4,192.168.19.56 status
+```
+
+For larger numbers of devices, a file of such entires may also be given.
+
+```sh
+$ cat device.list
+192.168.19.4
+192.168.19.56
+192.168.19.100
+$ python3 -m alluvium device.list status
+```
 
 ## Software Simulation
 
