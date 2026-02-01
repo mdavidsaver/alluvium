@@ -730,6 +730,9 @@ A comma seperated list of the same, or the name of a file containing lines of th
 def wrapper(name, dest, args):
     # lookup by name to avoid pickle limitations
     action = globals()[name]
+    # configure in child process
+    logging.basicConfig(level=args.level)
+
     with SPIClient(dest) as cli:
         action(cli, args)
 
