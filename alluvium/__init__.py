@@ -18,7 +18,7 @@ except ImportError:
         return False
 
 from .client import SPIClient, Dest
-from .xbit import XBit
+from .xbit import XBit, maybe_bit
 from .progress import Progress
 
 if isatty(sys.stdout.fileno()):
@@ -275,7 +275,7 @@ def flash_read(cli: SPIClient, args):
 
 def flash_verify(cli: SPIClient, args):
     base, count, inp = args.base, args.size, args.file
-    inp = open(inp, 'rb') if inp and inp!='-' else sys.stdin.buffer
+    inp = maybe_bit(open(inp, 'rb') if inp and inp!='-' else sys.stdin.buffer)
 
     if count is None:
         inp.seek(0, 2) # jump to end
@@ -465,7 +465,7 @@ def flash_program(cli: SPIClient, args):
 
     psize = 256
 
-    fp = open(file, 'rb')
+    fp = maybe_bit(open(file, 'rb'))
 
     fp.seek(0, 2) # jump to end
     args.size = size = fp.tell()

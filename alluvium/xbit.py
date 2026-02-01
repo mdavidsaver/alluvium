@@ -4,6 +4,7 @@
 Xilinx bit file header parser
 """
 
+import io
 import logging
 
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ class XBit:
     file_size: int = None # total length of header and all TLV
 
     @classmethod
-    def parse(klass, inp: 'io.RawIOBase') -> 'XBit':
+    def parse(klass, inp: io.RawIOBase) -> 'XBit':
         ret = klass()
 
         start = inp.tell()
@@ -45,7 +46,7 @@ class XBit:
         # treat first two as fixed
         pref = inp.read(len(_prefix))
         if pref!=_prefix:
-            raise RuntimeError(f'Malformed .bit header {pref!r}')
+            raise RuntimeError(f'Malformed .bit header: {pref!r}')
 
         # design name
         L, = unpack('>H', inp.read(2))
@@ -81,6 +82,20 @@ class XBit:
                 raise RuntimeError(f'Unknown bit file tag 0x{T:02x}')
 
         return ret
+
+def maybe_bit(F: io.RawIOBase) -> io.RawIOBase:
+    if not F.name.endswith('.bit') or not F.seekable():
+        return
+
+    pos = F.tell()
+    try:
+        XBit.parse(F)
+    except Exception as e:
+        _log.warning('.bit file does not parse as xilinx bitstream: %s', e)
+    finally:
+        F.seek(pos)
+
+    return F
 
 def getargs():
     from argparse import ArgumentParser, FileType
