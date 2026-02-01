@@ -128,7 +128,7 @@ class FlashFile(io.RawIOBase):
             pos = self._pos + pos
         elif whence==2:
             pos = self._cap + pos
-        self._pos = pos = min(pos, self._cap)
+        self._pos = pos = max(0, min(pos, self._cap))
         return pos
 
     def readable(self):
